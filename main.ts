@@ -1,79 +1,80 @@
-// Absurd Micro-Startup Pitch-Off — entry program.
+// Absurd Micro-Startup Pitch-Off — entry publisher.
 //
-// The entry (143 characters, one line, no trailing newline):
-//   "Uber for houseplants: an AI agent that waters your fern, apologizes to
-//    it daily, and charges your landlord $9.99 a month for emotional support."
-// The pitch is absurd on purpose: the fern gets the care, the landlord gets
-// the bill, and the AI agent's entire job is watering plus daily apologies —
-// emotional support as a $9.99/month subscription for a houseplant.
+// The pitch itself: "Uber for houseplants" — an AI agent that waters
+// your fern, apologizes to it every single day, and then bills your
+// landlord $9.99 a month for the fern's emotional support. The joke
+// is the whole business model: the plant gets therapy, the human
+// gets a watering service, and the landlord gets the invoice.
 //
-// This program reads that single funny line from entry.txt next to this file
-// and writes it byte-identical to $MAKEFUN_OUTPUT_DIR/entry.txt (default
-// /output). Runs with no network, any CWD, in a read-only /bot directory.
+// This little program takes that one-line pitch from entry.txt
+// (sitting right next to this script) and copies it, byte for byte,
+// into the directory the judge points at with MAKEFUN_OUTPUT_DIR.
+// Along the way it checks that the pitch is a single clean line of
+// at most 200 characters, so a stray newline or a broken encoding
+// can never slip through silently.
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-
-const MAX_CHARS = 200;
+import { fileURLToPath } from "node:url";
 
 function fail(message: string): never {
   console.error(`error: ${message}`);
   process.exit(1);
 }
 
-// Absolute path to entry.txt, resolved from this file's own location so the
-// program works no matter what the current working directory is.
-const here = dirname(fileURLToPath(import.meta.url));
-const sourcePath = join(here, "entry.txt");
-
-const outputDir = process.env.MAKEFUN_OUTPUT_DIR || "/output";
-const outputPath = join(outputDir, "entry.txt");
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const sourcePath = join(scriptDir, "entry.txt");
 
 let raw: Buffer;
 try {
   raw = readFileSync(sourcePath);
-} catch (err) {
-  fail(`cannot read ${sourcePath}: ${(err as Error).message}`);
+} catch {
+  fail(`cannot read ${sourcePath}`);
 }
 
-// Reject invalid UTF-8 instead of silently replacing bad bytes: the gate
-// scores the file as UTF-8 text, so a replacement character would change it.
+// Checks every rule the bounty sets for the entry text and returns
+// its length in Unicode code points. Anything off-spec stops the
+// run with a plain-language error on stderr and exit code 1.
+function validateEntry(text: string): number {
+  if (text.includes("\r") || text.includes("\n")) {
+    fail("entry must be exactly one line — found a carriage return or line feed");
+  }
+
+  const count = [...text].length;
+  if (count < 1) {
+    fail("entry is empty — it needs at least 1 character");
+  }
+  if (count > 200) {
+    fail(`entry is ${count} characters, over the 200-character limit`);
+  }
+
+  if (text.trim().length === 0) {
+    fail("entry must not be only whitespace");
+  }
+
+  return count;
+}
+
 let text: string;
 try {
   text = new TextDecoder("utf-8", { fatal: true }).decode(raw);
 } catch {
-  fail("entry.txt is not valid UTF-8");
+  fail("entry is not valid strict UTF-8 — it contains invalid bytes");
 }
 
-// Gate: exactly one line, 1-200 characters, not only whitespace, no CR/LF
-// anywhere (including a trailing newline).
-// Count code points (not UTF-16 units) so the 200-char gate matches the
-// scorer's character count even for non-BMP characters.
-const charCount = [...text].length;
-if (text.includes("\r") || text.includes("\n")) {
-  fail("entry must be exactly one line with no newline characters");
-}
-if (charCount < 1 || charCount > MAX_CHARS) {
-  fail(`entry must be 1-${MAX_CHARS} characters, got ${charCount}`);
-}
-if (text.trim().length === 0) {
-  fail("entry must not be only whitespace");
+const charCount = validateEntry(text);
+
+const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
+mkdirSync(outDir, { recursive: true });
+const outPath = join(outDir, "entry.txt");
+writeFileSync(outPath, raw);
+
+const writtenBack = readFileSync(outPath);
+if (!writtenBack.equals(raw)) {
+  fail("round-trip check failed: output differs from the source entry");
 }
 
-try {
-  mkdirSync(outputDir, { recursive: true });
-  writeFileSync(outputPath, raw);
-} catch (err) {
-  fail(`cannot write ${outputPath}: ${(err as Error).message}`);
-}
-
-// Verify the written file is byte-identical before reporting success.
-const written = readFileSync(outputPath);
-if (!written.equals(raw)) {
-  fail("verification failed: output differs from entry.txt");
-}
-
-const bytes = raw.length;
-console.log(`wrote ${outputPath}: ${charCount} characters, ${bytes} bytes`);
+console.log(`output: ${outPath}`);
+console.log(`characters: ${charCount}`);
+console.log(`bytes: ${raw.length}`);
 console.log(`entry: ${text}`);
